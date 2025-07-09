@@ -19,6 +19,7 @@ import AdminDashboard from './pages/admin/AdminDashboard'
 import AdminEmployees from './pages/admin/AdminEmployees'
 import AdminAttendance from './pages/admin/AdminAttendance'
 import AdminSalary from './pages/admin/AdminSalary'
+import AdminSettings from './pages/admin/AdminSettings' // New import
 
 // Smart redirect component
 const SmartRedirect = () => {
@@ -130,6 +131,15 @@ function App() {
             <AuthGuard requireAdmin>
               <Layout>
                 <AdminSalary />
+              </Layout>
+            </AuthGuard>
+          } />
+          
+          {/* New Admin Settings Route */}
+          <Route path="/admin/settings" element={
+            <AuthGuard requireAdmin>
+              <Layout>
+                <AdminSettings />
               </Layout>
             </AuthGuard>
           } />

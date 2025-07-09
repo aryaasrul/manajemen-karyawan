@@ -1,8 +1,10 @@
-// src/pages/admin/AdminDashboard.jsx
+// src/pages/admin/AdminDashboard.jsx - Updated dengan Office Location Alert
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
+import { useCompanyStore } from '../../stores/companyStore'
 import { Users, Clock, DollarSign, Calendar, TrendingUp, AlertCircle } from 'lucide-react'
 import dayjs from 'dayjs'
+import OfficeLocationAlert from '../../components/admin/OfficeLocationAlert'
 
 const AdminDashboard = () => {
   const [stats, setStats] = useState({
@@ -13,6 +15,9 @@ const AdminDashboard = () => {
   })
   const [recentActivity, setRecentActivity] = useState([])
   const [isLoading, setIsLoading] = useState(true)
+  const [showLocationAlert, setShowLocationAlert] = useState(true)
+  
+  const { settings } = useCompanyStore()
 
   useEffect(() => {
     fetchDashboardData()
@@ -127,6 +132,14 @@ const AdminDashboard = () => {
 
   return (
     <div className="space-y-6">
+      {/* Office Location Alert */}
+      {showLocationAlert && (
+        <OfficeLocationAlert 
+          settings={settings}
+          onDismiss={() => setShowLocationAlert(false)}
+        />
+      )}
+
       {/* Header */}
       <div className="bg-white rounded-lg shadow-sm p-6">
         <h1 className="text-2xl font-bold text-gray-900">Admin Dashboard</h1>
@@ -239,6 +252,17 @@ const AdminDashboard = () => {
                 <div>
                   <p className="font-medium text-gray-900">Kelola Gaji</p>
                   <p className="text-sm text-gray-600">Generate slip gaji dan bonus</p>
+                </div>
+              </a>
+
+              <a
+                href="/admin/settings"
+                className="flex items-center p-4 border border-gray-200 rounded-lg hover:border-orange-300 hover:bg-orange-50 transition-colors"
+              >
+                <AlertCircle className="h-6 w-6 text-orange-500 mr-3" />
+                <div>
+                  <p className="font-medium text-gray-900">Pengaturan Sistem</p>
+                  <p className="text-sm text-gray-600">Lokasi kantor, jam kerja, dll</p>
                 </div>
               </a>
               

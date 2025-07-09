@@ -1,4 +1,4 @@
-// src/lib/supabase.js - Complete Implementation
+// src/lib/supabase.js - Complete Implementation with Improved Selfie Features
 import { createClient } from '@supabase/supabase-js'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
@@ -240,11 +240,212 @@ export const supabaseHelpers = {
     }
   },
 
-  async checkIn(userId, location, selfieUrl) {
+  // ============================================
+  // IMPROVED SELFIE & FILE STORAGE HELPERS
+  // ============================================
+
+  // Helper function untuk convert blob ke file
+  blobToFile(blob, fileName) {
+    return new File([blob], fileName, {
+      type: 'image/jpeg',
+      lastModified: Date.now()
+    })
+  },
+
+  // Resize image sebelum upload (optimization)
+  async resizeImage(file, maxWidth = 800, maxHeight = 600, quality = 0.8) {
+    return new Promise((resolve) => {
+      const canvas = document.createElement('canvas')
+      const ctx = canvas.getContext('2d')
+      const img = new Image()
+      
+      img.onload = () => {
+        // Calculate new dimensions
+        let { width, height } = img
+        
+        if (width > height) {
+          if (width > maxWidth) {
+            height = height * (maxWidth / width)
+            width = maxWidth
+          }
+        } else {
+          if (height > maxHeight) {
+            width = width * (maxHeight / height)
+            height = maxHeight
+          }
+        }
+        
+        canvas.width = width
+        canvas.height = height
+        
+        // Draw resized image
+        ctx.drawImage(img, 0, 0, width, height)
+        
+        // Convert to blob
+        canvas.toBlob(resolve, 'image/jpeg', quality)
+      }
+      
+      img.src = URL.createObjectURL(file)
+    })
+  },
+
+  // Improved selfie upload with better error handling
+  async uploadSelfie(file, userId, type) {
+    try {
+      // Validate file
+      if (!file) {
+        throw new Error('File tidak tersedia')
+      }
+
+      if (file.size > 10 * 1024 * 1024) { // 10MB
+        throw new Error('Ukuran file terlalu besar (maksimal 10MB)')
+      }
+
+      // Create filename dengan timestamp untuk uniqueness
+      const timestamp = Date.now()
+      const fileName = `${userId}/${type}_${timestamp}.jpg`
+      
+      console.log('Uploading selfie:', fileName)
+      
+      // Upload file ke Supabase Storage
+      const { data, error } = await supabase.storage
+        .from('selfies')
+        .upload(fileName, file, {
+          cacheControl: '3600',
+          upsert: false,
+          contentType: 'image/jpeg'
+        })
+      
+      if (error) {
+        console.error('Storage upload error:', error)
+        throw new Error(`Upload failed: ${error.message}`)
+      }
+      
+      console.log('Upload successful:', data)
+      
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('selfies')
+        .getPublicUrl(fileName)
+      
+      if (!publicUrl) {
+        throw new Error('Failed to get public URL')
+      }
+      
+      console.log('Public URL:', publicUrl)
+      
+      return { data: publicUrl, error: null }
+    } catch (error) {
+      console.error('Error uploading selfie:', error)
+      return { data: null, error: error.message || 'Gagal upload selfie' }
+    }
+  },
+
+  async deleteSelfie(filePath) {
+    try {
+      const { data, error } = await supabase.storage
+        .from('selfies')
+        .remove([filePath])
+      
+      return { data, error }
+    } catch (error) {
+      console.error('Error deleting selfie:', error)
+      return { data: null, error }
+    }
+  },
+
+  // Clean up old selfies (untuk auto-delete setelah 24 jam)
+  async cleanupOldSelfies(userId) {
+    try {
+      const { data: files, error } = await supabase.storage
+        .from('selfies')
+        .list(userId)
+      
+      if (error) throw error
+      
+      const now = new Date()
+      const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+      
+      const oldFiles = files.filter(file => {
+        const fileDate = new Date(file.created_at)
+        return fileDate < oneDayAgo
+      })
+      
+      if (oldFiles.length > 0) {
+        const filePaths = oldFiles.map(file => `${userId}/${file.name}`)
+        
+        const { error: deleteError } = await supabase.storage
+          .from('selfies')
+          .remove(filePaths)
+        
+        if (deleteError) throw deleteError
+        
+        console.log(`Cleaned up ${oldFiles.length} old selfies for user ${userId}`)
+      }
+      
+      return { success: true, deletedCount: oldFiles.length }
+    } catch (error) {
+      console.error('Error cleaning up old selfies:', error)
+      return { success: false, error: error.message }
+    }
+  },
+
+  // Check storage quota
+  async getStorageUsage(userId) {
+    try {
+      const { data: files, error } = await supabase.storage
+        .from('selfies')
+        .list(userId)
+      
+      if (error) throw error
+      
+      const totalSize = files.reduce((sum, file) => sum + (file.metadata?.size || 0), 0)
+      const fileCount = files.length
+      
+      return {
+        data: {
+          totalSize,
+          fileCount,
+          totalSizeMB: (totalSize / (1024 * 1024)).toFixed(2)
+        },
+        error: null
+      }
+    } catch (error) {
+      console.error('Error getting storage usage:', error)
+      return { data: null, error: error.message }
+    }
+  },
+
+  // Enhanced check-in dengan improved selfie handling
+  async checkIn(userId, location, selfieBlob) {
     const today = new Date().toISOString().split('T')[0]
     const now = new Date().toISOString()
     
     try {
+      let selfieUrl = null
+      
+      // Upload selfie if provided
+      if (selfieBlob) {
+        console.log('Starting selfie upload for check-in...')
+        
+        // Convert blob to file
+        const selfieFile = this.blobToFile(selfieBlob, `checkin_${userId}_${Date.now()}.jpg`)
+        
+        // Optionally resize image
+        const resizedBlob = await this.resizeImage(selfieFile)
+        const resizedFile = this.blobToFile(resizedBlob, selfieFile.name)
+        
+        const uploadResult = await this.uploadSelfie(resizedFile, userId, 'checkin')
+        
+        if (uploadResult.error) {
+          throw new Error(`Gagal upload selfie: ${uploadResult.error}`)
+        }
+        
+        selfieUrl = uploadResult.data
+        console.log('Selfie uploaded successfully:', selfieUrl)
+      }
+      
+      // Save attendance record
       const { data, error } = await supabase
         .from('attendance')
         .upsert({
@@ -261,18 +462,49 @@ export const supabaseHelpers = {
         .select()
         .single()
       
-      return { data, error }
+      if (error) {
+        // If attendance save fails but selfie was uploaded, should we delete it?
+        console.error('Attendance save error:', error)
+        throw error
+      }
+      
+      return { data, error: null }
     } catch (error) {
       console.error('Error checking in:', error)
-      return { data: null, error }
+      return { data: null, error: error.message || 'Gagal check-in' }
     }
   },
 
-  async checkOut(userId, location, selfieUrl) {
+  // Enhanced check-out dengan improved selfie handling
+  async checkOut(userId, location, selfieBlob) {
     const today = new Date().toISOString().split('T')[0]
     const now = new Date().toISOString()
     
     try {
+      let selfieUrl = null
+      
+      // Upload selfie if provided
+      if (selfieBlob) {
+        console.log('Starting selfie upload for check-out...')
+        
+        // Convert blob to file
+        const selfieFile = this.blobToFile(selfieBlob, `checkout_${userId}_${Date.now()}.jpg`)
+        
+        // Optionally resize image
+        const resizedBlob = await this.resizeImage(selfieFile)
+        const resizedFile = this.blobToFile(resizedBlob, selfieFile.name)
+        
+        const uploadResult = await this.uploadSelfie(resizedFile, userId, 'checkout')
+        
+        if (uploadResult.error) {
+          throw new Error(`Gagal upload selfie: ${uploadResult.error}`)
+        }
+        
+        selfieUrl = uploadResult.data
+        console.log('Selfie uploaded successfully:', selfieUrl)
+      }
+      
+      // Update attendance record
       const { data, error } = await supabase
         .from('attendance')
         .update({
@@ -286,50 +518,15 @@ export const supabaseHelpers = {
         .select()
         .single()
       
-      return { data, error }
+      if (error) {
+        console.error('Attendance update error:', error)
+        throw error
+      }
+      
+      return { data, error: null }
     } catch (error) {
       console.error('Error checking out:', error)
-      return { data: null, error }
-    }
-  },
-
-  // ============================================
-  // FILE STORAGE HELPERS
-  // ============================================
-
-  async uploadSelfie(file, userId, type) {
-    try {
-      const fileName = `${userId}/${type}_${Date.now()}.jpg`
-      const { data, error } = await supabase.storage
-        .from('selfies')
-        .upload(fileName, file, {
-          cacheControl: '3600',
-          upsert: false
-        })
-      
-      if (error) throw error
-      
-      const { data: { publicUrl } } = supabase.storage
-        .from('selfies')
-        .getPublicUrl(fileName)
-        
-      return { data: publicUrl, error: null }
-    } catch (error) {
-      console.error('Error uploading selfie:', error)
-      return { data: null, error }
-    }
-  },
-
-  async deleteSelfie(filePath) {
-    try {
-      const { data, error } = await supabase.storage
-        .from('selfies')
-        .remove([filePath])
-      
-      return { data, error }
-    } catch (error) {
-      console.error('Error deleting selfie:', error)
-      return { data: null, error }
+      return { data: null, error: error.message || 'Gagal check-out' }
     }
   },
 
@@ -724,6 +921,385 @@ export const supabaseHelpers = {
     } catch (error) {
       console.error(`Error batch updating ${table}:`, error)
       return { data: [], error }
+    }
+  },
+
+  // ============================================
+  // ADVANCED HELPERS
+  // ============================================
+
+  // Generate attendance report
+  async generateAttendanceReport(startDate, endDate, userId = null) {
+    try {
+      let query = supabase
+        .from('attendance')
+        .select(`
+          *,
+          profiles(full_name, employee_id, base_salary, rate_per_minute)
+        `)
+        .gte('date', startDate)
+        .lte('date', endDate)
+        .order('date', { ascending: false })
+
+      if (userId) {
+        query = query.eq('user_id', userId)
+      }
+
+      const { data, error } = await query
+
+      if (error) throw error
+
+      // Calculate summary statistics
+      const summary = {
+        totalRecords: data.length,
+        totalMinutes: data.reduce((sum, record) => sum + (record.total_minutes || 0), 0),
+        completedDays: data.filter(record => record.status === 'completed').length,
+        incompleteDays: data.filter(record => record.status === 'incomplete').length
+      }
+
+      return { data: { records: data, summary }, error: null }
+    } catch (error) {
+      console.error('Error generating attendance report:', error)
+      return { data: null, error }
+    }
+  },
+
+  // Bulk attendance operations
+  async bulkUpdateAttendance(updates) {
+    try {
+      const { data, error } = await supabase
+        .from('attendance')
+        .upsert(updates, {
+          onConflict: 'user_id,date'
+        })
+        .select()
+
+      return { data: data || [], error }
+    } catch (error) {
+      console.error('Error bulk updating attendance:', error)
+      return { data: [], error }
+    }
+  },
+
+  // Employee performance metrics
+  async getEmployeeMetrics(userId, period = 30) {
+    try {
+      const endDate = new Date().toISOString().split('T')[0]
+      const startDate = new Date(Date.now() - period * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+
+      const { data: attendance, error: attendanceError } = await this.getAttendanceHistory(userId, period)
+      if (attendanceError) throw attendanceError
+
+      const { data: bonuses, error: bonusError } = await this.getApprovedBonuses(userId)
+      if (bonusError) throw bonusError
+
+      // Calculate metrics
+      const metrics = {
+        workingDays: attendance.filter(a => a.status === 'completed').length,
+        totalMinutes: attendance.reduce((sum, a) => sum + (a.total_minutes || 0), 0),
+        averageMinutesPerDay: 0,
+        totalBonusMinutes: bonuses.reduce((sum, b) => sum + (b.bonus_minutes || 0), 0),
+        attendanceRate: 0
+      }
+
+      if (metrics.workingDays > 0) {
+        metrics.averageMinutesPerDay = Math.round(metrics.totalMinutes / metrics.workingDays)
+        metrics.attendanceRate = Math.round((metrics.workingDays / period) * 100)
+      }
+
+      return { data: metrics, error: null }
+    } catch (error) {
+      console.error('Error getting employee metrics:', error)
+      return { data: null, error }
+    }
+  },
+
+  // System health check
+  async performHealthCheck() {
+    try {
+      const checks = []
+
+      // Test database connection
+      const dbTest = await this.testConnection()
+      checks.push({
+        name: 'Database Connection',
+        status: dbTest.success ? 'healthy' : 'error',
+        message: dbTest.success ? 'Connected' : dbTest.error?.message
+      })
+
+      // Test storage access
+      try {
+        const { data: buckets } = await supabase.storage.listBuckets()
+        const selfiesBucket = buckets?.find(b => b.id === 'selfies')
+        checks.push({
+          name: 'Storage Access',
+          status: selfiesBucket ? 'healthy' : 'warning',
+          message: selfiesBucket ? 'Selfies bucket accessible' : 'Selfies bucket not found'
+        })
+      } catch (storageError) {
+        checks.push({
+          name: 'Storage Access',
+          status: 'error',
+          message: storageError.message
+        })
+      }
+
+      // Test authentication
+      try {
+        const user = await this.getCurrentUser()
+        checks.push({
+          name: 'Authentication',
+          status: user ? 'healthy' : 'warning',
+          message: user ? 'User authenticated' : 'No authenticated user'
+        })
+      } catch (authError) {
+        checks.push({
+          name: 'Authentication',
+          status: 'error',
+          message: authError.message
+        })
+      }
+
+      const overallStatus = checks.every(c => c.status === 'healthy') ? 'healthy' :
+                           checks.some(c => c.status === 'error') ? 'error' : 'warning'
+
+      return {
+        data: {
+          status: overallStatus,
+          timestamp: new Date().toISOString(),
+          checks
+        },
+        error: null
+      }
+    } catch (error) {
+      console.error('Error performing health check:', error)
+      return { data: null, error }
+    }
+  },
+
+  // Clean up expired data
+  async cleanupExpiredData() {
+    try {
+      const results = []
+
+      // Clean up old selfies for all users
+      const { data: profiles } = await this.getAllProfiles()
+      if (profiles) {
+        for (const profile of profiles) {
+          const cleanupResult = await this.cleanupOldSelfies(profile.id)
+          if (cleanupResult.success && cleanupResult.deletedCount > 0) {
+            results.push({
+              userId: profile.id,
+              deletedFiles: cleanupResult.deletedCount
+            })
+          }
+        }
+      }
+
+      // Clean up old audit logs (keep only last 90 days)
+      const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString()
+      const { error: auditError } = await supabase
+        .from('audit_logs')
+        .delete()
+        .lt('created_at', ninetyDaysAgo)
+
+      if (auditError) {
+        console.error('Error cleaning up audit logs:', auditError)
+      }
+
+      return {
+        data: {
+          selfieCleanup: results,
+          auditLogsCleanup: !auditError
+        },
+        error: null
+      }
+    } catch (error) {
+      console.error('Error cleaning up expired data:', error)
+      return { data: null, error }
+    }
+  },
+
+  // Export data functions
+  async exportAttendanceData(startDate, endDate, format = 'json') {
+    try {
+      const { data: reportData, error } = await this.generateAttendanceReport(startDate, endDate)
+      if (error) throw error
+
+      switch (format.toLowerCase()) {
+        case 'csv':
+          return this.convertToCSV(reportData.records)
+        case 'json':
+        default:
+          return { data: reportData, error: null }
+      }
+    } catch (error) {
+      console.error('Error exporting attendance data:', error)
+      return { data: null, error }
+    }
+  },
+
+  // Helper function to convert data to CSV
+  convertToCSV(data) {
+    if (!data || data.length === 0) {
+      return { data: '', error: null }
+    }
+
+    try {
+      const headers = Object.keys(data[0]).filter(key => 
+        !key.includes('_location') && !key.includes('_selfie_url')
+      )
+      
+      const csvContent = [
+        headers.join(','),
+        ...data.map(row => 
+          headers.map(header => {
+            const value = row[header]
+            if (value === null || value === undefined) return ''
+            if (typeof value === 'string' && value.includes(',')) {
+              return `"${value.replace(/"/g, '""')}"`
+            }
+            return value
+          }).join(',')
+        )
+      ].join('\n')
+
+      return { data: csvContent, error: null }
+    } catch (error) {
+      console.error('Error converting to CSV:', error)
+      return { data: null, error }
+    }
+  },
+
+  // Advanced search functionality
+  async searchEmployees(searchTerm, filters = {}) {
+    try {
+      let query = supabase
+        .from('profiles')
+        .select('*')
+
+      // Apply text search
+      if (searchTerm) {
+        query = query.or(`full_name.ilike.%${searchTerm}%,employee_id.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%`)
+      }
+
+      // Apply filters
+      if (filters.role) {
+        query = query.eq('role', filters.role)
+      }
+      if (filters.isActive !== undefined) {
+        query = query.eq('is_active', filters.isActive)
+      }
+      if (filters.hireDateAfter) {
+        query = query.gte('hire_date', filters.hireDateAfter)
+      }
+      if (filters.hireDateBefore) {
+        query = query.lte('hire_date', filters.hireDateBefore)
+      }
+
+      const { data, error } = await query.order('created_at', { ascending: false })
+
+      return { data: data || [], error }
+    } catch (error) {
+      console.error('Error searching employees:', error)
+      return { data: [], error }
+    }
+  },
+
+  // Get dashboard statistics
+  async getDashboardStats() {
+    try {
+      const today = new Date().toISOString().split('T')[0]
+      const currentMonth = new Date().getMonth() + 1
+      const currentYear = new Date().getFullYear()
+
+      // Fetch all required data in parallel
+      const [
+        employeesResult,
+        todayAttendanceResult,
+        pendingBonusesResult,
+        monthlyPayrollResult
+      ] = await Promise.all([
+        this.getAllProfiles(),
+        this.getAllAttendanceByDate(today),
+        this.getPendingBonuses(),
+        supabase
+          .from('salary_slips')
+          .select('total_salary')
+          .eq('month', currentMonth)
+          .eq('year', currentYear)
+      ])
+
+      const stats = {
+        totalEmployees: employeesResult.data?.filter(emp => 
+          emp.role === 'employee' && emp.is_active
+        ).length || 0,
+        activeToday: todayAttendanceResult.data?.length || 0,
+        pendingBonuses: pendingBonusesResult.data?.length || 0,
+        monthlyPayroll: monthlyPayrollResult.data?.reduce(
+          (sum, slip) => sum + Number(slip.total_salary), 0
+        ) || 0
+      }
+
+      return { data: stats, error: null }
+    } catch (error) {
+      console.error('Error getting dashboard stats:', error)
+      return { data: null, error }
+    }
+  },
+
+  // Notification helpers
+  async createNotification(userId, title, message, type = 'info') {
+    try {
+      const { data, error } = await supabase
+        .from('notifications')
+        .insert({
+          user_id: userId,
+          title,
+          message,
+          type,
+          is_read: false,
+          created_at: new Date().toISOString()
+        })
+        .select()
+        .single()
+
+      return { data, error }
+    } catch (error) {
+      console.error('Error creating notification:', error)
+      return { data: null, error }
+    }
+  },
+
+  async getUnreadNotifications(userId) {
+    try {
+      const { data, error } = await supabase
+        .from('notifications')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('is_read', false)
+        .order('created_at', { ascending: false })
+
+      return { data: data || [], error }
+    } catch (error) {
+      console.error('Error getting unread notifications:', error)
+      return { data: [], error }
+    }
+  },
+
+  async markNotificationAsRead(notificationId) {
+    try {
+      const { data, error } = await supabase
+        .from('notifications')
+        .update({ is_read: true })
+        .eq('id', notificationId)
+        .select()
+        .single()
+
+      return { data, error }
+    } catch (error) {
+      console.error('Error marking notification as read:', error)
+      return { data: null, error }
     }
   }
 }

@@ -28,12 +28,13 @@ const Layout = ({ children }) => {
     { name: 'Profile', href: '/profile', icon: User },
   ]
 
-  // Navigation untuk Admin
+  // Navigation untuk Admin (Updated dengan Settings)
   const adminNavigation = [
     { name: 'Admin Dashboard', href: '/admin', icon: BarChart3 },
     { name: 'Kelola Karyawan', href: '/admin/employees', icon: Users },
     { name: 'Kelola Absensi', href: '/admin/attendance', icon: Clock },
     { name: 'Kelola Gaji', href: '/admin/salary', icon: DollarSign },
+    { name: 'Pengaturan', href: '/admin/settings', icon: Settings }, // New menu item
     { name: 'Profile', href: '/profile', icon: User },
   ]
 
