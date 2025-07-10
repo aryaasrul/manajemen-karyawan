@@ -1,7 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useEnhancedAttendance } from '../hooks/useEnhancedAttendance';
-import { useAuth } from '../hooks/useAuth';
-import { supabaseHelpers } from '../lib/supabase';
 import { 
   MapPin, 
   Wifi, 
@@ -12,7 +9,6 @@ import {
   XCircle, 
   AlertTriangle,
   RotateCcw,
-  Settings,
   Eye,
   EyeOff,
   Loader
@@ -20,24 +16,19 @@ import {
 import { toast } from 'react-hot-toast';
 
 const EnhancedAttendancePage = () => {
-  const { user } = useAuth();
-  const {
-    validation,
-    runValidation,
-    getValidationSummary,
-    submit,
-    submitAttendance,
-    network,
-    detectNetwork,
-    setManualWifiSSID,
-    toggleManualWifiMode,
-    device,
-    checkDeviceRegistration,
-    registerDevice,
-    location,
-    getCurrentLocation,
-    isLoading
-  } = useEnhancedAttendance();
+  // States for validation
+  const [validationState, setValidationState] = useState({
+    location: null,
+    wifi: null,
+    device: null,
+    score: 0,
+    requiresApproval: true
+  });
+
+  // States for attendance
+  const [currentStep, setCurrentStep] = useState(1);
+  const [attendanceType, setAttendanceType] = useState('check_in'); // or 'check_out'
+  const [todayAttendance] = useState(null); // Mock - would come from API
 
   // Camera states
   const [showCamera, setShowCamera] = useState(false);
@@ -46,56 +37,139 @@ const EnhancedAttendancePage = () => {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
 
-  // Attendance data
-  const [todayAttendance, setTodayAttendance] = useState(null);
-  const [attendanceType, setAttendanceType] = useState(null);
-
-  // UI states
+  // Form states
+  const [isProcessing, setIsProcessing] = useState(false);
   const [showValidationDetails, setShowValidationDetails] = useState(false);
-  const [currentStep, setCurrentStep] = useState(1);
+  const [manualWifiSSID, setManualWifiSSID] = useState('');
 
-  // Initialize
+  // Mock validation data
+  const [mockValidation] = useState({
+    location: {
+      valid: true,
+      name: 'Kantor Pusat',
+      distance: 50
+    },
+    wifi: {
+      valid: false,
+      ssid: 'UnknownNetwork'
+    },
+    device: {
+      valid: false,
+      fingerprint: 'abc123def456',
+      needsRegistration: true
+    },
+    workHours: {
+      valid: true,
+      currentTime: '09:15'
+    }
+  });
+
   useEffect(() => {
-    initializePage();
-  }, [user]);
+    // Simulate device fingerprinting
+    generateDeviceFingerprint();
+    
+    // Check GPS location
+    getCurrentLocation();
+    
+    // Detect network
+    detectNetwork();
+  }, []);
 
-  const initializePage = async () => {
-    if (!user) return;
+  const generateDeviceFingerprint = async () => {
+    // Mock device fingerprinting
+    setTimeout(() => {
+      const fingerprint = 'dev_' + Math.random().toString(36).substr(2, 9);
+      setValidationState(prev => ({
+        ...prev,
+        device: {
+          valid: false,
+          fingerprint,
+          needsRegistration: true
+        }
+      }));
+    }, 1000);
+  };
 
-    try {
-      // Fetch today's attendance
-      await fetchTodayAttendance();
-      
-      // Check device registration
-      await checkDeviceRegistration(user.id);
-      
-      // Detect network
-      await detectNetwork();
-      
-      // Get current location
-      await getCurrentLocation();
-    } catch (error) {
-      console.error('Page initialization error:', error);
+  const getCurrentLocation = () => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const location = {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude
+          };
+          
+          // Mock location validation
+          setValidationState(prev => ({
+            ...prev,
+            location: {
+              valid: true,
+              coordinates: location,
+              name: 'Kantor Pusat',
+              distance: 45
+            }
+          }));
+          
+          toast.success('Lokasi berhasil didapat');
+        },
+        (error) => {
+          toast.error('Gagal mendapatkan lokasi GPS');
+          setValidationState(prev => ({
+            ...prev,
+            location: {
+              valid: false,
+              error: error.message
+            }
+          }));
+        }
+      );
+    } else {
+      toast.error('GPS tidak didukung browser');
     }
   };
 
-  const fetchTodayAttendance = async () => {
-    try {
-      const { data, error } = await supabaseHelpers.getTodayAttendance(user.id);
-      if (error) throw error;
-      setTodayAttendance(data);
+  const detectNetwork = () => {
+    // Mock network detection
+    setTimeout(() => {
+      setValidationState(prev => ({
+        ...prev,
+        wifi: {
+          valid: false,
+          ssid: 'DetectedNetwork',
+          approved: false
+        }
+      }));
+    }, 500);
+  };
+
+  const runValidation = () => {
+    setIsProcessing(true);
+    
+    // Mock validation calculation
+    setTimeout(() => {
+      const location = validationState.location?.valid ? 25 : 0;
+      const wifi = validationState.wifi?.valid ? 25 : 0;
+      const device = validationState.device?.valid ? 20 : 0;
+      const workHours = mockValidation.workHours.valid ? 10 : 0;
+      const selfie = capturedImage ? 10 : 0;
       
-      // Determine attendance type
-      if (!data?.check_in_time) {
-        setAttendanceType('check_in');
-      } else if (!data?.check_out_time) {
-        setAttendanceType('check_out');
+      const totalScore = location + wifi + device + workHours + selfie;
+      
+      setValidationState(prev => ({
+        ...prev,
+        score: totalScore,
+        requiresApproval: totalScore < 80
+      }));
+      
+      setCurrentStep(2);
+      setIsProcessing(false);
+      
+      if (totalScore >= 80) {
+        toast.success('Validasi berhasil! Akan otomatis disetujui.');
       } else {
-        setAttendanceType(null); // Already completed
+        toast.warning('Skor validasi rendah. Akan memerlukan approval admin.');
       }
-    } catch (error) {
-      console.error('Fetch attendance error:', error);
-    }
+    }, 2000);
   };
 
   // Camera functions
@@ -113,13 +187,7 @@ const EnhancedAttendancePage = () => {
         videoRef.current.srcObject = stream;
       }
     } catch (error) {
-      let errorMessage = 'Gagal mengakses kamera';
-      if (error.name === 'NotAllowedError') {
-        errorMessage = 'Akses kamera ditolak. Harap aktifkan permission kamera.';
-      } else if (error.name === 'NotFoundError') {
-        errorMessage = 'Kamera tidak ditemukan';
-      }
-      toast.error(errorMessage);
+      toast.error('Gagal mengakses kamera');
     }
   };
 
@@ -164,136 +232,82 @@ const EnhancedAttendancePage = () => {
     openCamera();
   };
 
-  // Validation and submission
-  const handleRunValidation = async () => {
-    try {
-      await runValidation(user.id, true);
-      setCurrentStep(2);
-    } catch (error) {
-      toast.error('Gagal melakukan validasi');
-    }
-  };
-
   const handleSubmitAttendance = async () => {
     if (!capturedImage) {
       toast.error('Selfie diperlukan untuk absensi');
       return;
     }
 
-    try {
-      const result = await submitAttendance(user.id, attendanceType, capturedImage.blob);
+    setIsProcessing(true);
+    
+    // Mock submission
+    setTimeout(() => {
+      setIsProcessing(false);
       
-      if (result.success) {
-        // Refresh attendance data
-        await fetchTodayAttendance();
-        
-        // Reset form
-        setCapturedImage(null);
-        setCurrentStep(1);
+      if (validationState.requiresApproval) {
+        toast.success('Absensi berhasil disubmit! Menunggu approval admin.');
+      } else {
+        toast.success('Absensi berhasil dan otomatis disetujui!');
       }
-    } catch (error) {
-      // Error already handled in hook
-    }
+      
+      // Reset form
+      setCapturedImage(null);
+      setCurrentStep(1);
+    }, 2000);
   };
 
-  // Handle device registration
-  const handleRegisterDevice = async () => {
-    try {
-      await registerDevice(user.id, `Device ${new Date().toLocaleDateString()}`);
-    } catch (error) {
-      // Error already handled in hook
-    }
+  const getValidationSummary = () => {
+    return {
+      score: validationState.score,
+      scoreColor: validationState.score >= 80 ? 'green' : validationState.score >= 60 ? 'yellow' : 'red',
+      requiresApproval: validationState.requiresApproval,
+      checks: {
+        location: {
+          valid: validationState.location?.valid || false,
+          message: validationState.location?.valid 
+            ? `Lokasi valid: ${validationState.location.name}` 
+            : 'Lokasi tidak valid atau di luar area yang diizinkan'
+        },
+        wifi: {
+          valid: validationState.wifi?.valid || false,
+          message: validationState.wifi?.valid 
+            ? `WiFi disetujui: ${validationState.wifi.ssid}` 
+            : 'WiFi tidak disetujui atau tidak terdeteksi'
+        },
+        device: {
+          valid: validationState.device?.valid || false,
+          message: validationState.device?.valid 
+            ? 'Device terdaftar' 
+            : 'Device belum terdaftar atau menunggu approval'
+        },
+        workHours: {
+          valid: mockValidation.workHours.valid,
+          message: mockValidation.workHours.valid 
+            ? 'Dalam jam kerja' 
+            : `Di luar jam kerja (${mockValidation.workHours.currentTime})`
+        },
+        selfie: {
+          valid: !!capturedImage,
+          message: capturedImage ? 'Selfie tersedia' : 'Selfie diperlukan'
+        }
+      }
+    };
   };
 
   const validationSummary = getValidationSummary();
-  const canProceed = validationSummary && validationSummary.score >= 50;
-
-  if (!user) {
-    return <div className="flex items-center justify-center h-64">Loading...</div>;
-  }
-
-  // If attendance is already complete for today
-  if (!attendanceType) {
-    return (
-      <div className="max-w-2xl mx-auto p-6">
-        <div className="bg-white rounded-lg shadow-sm p-8 text-center">
-          <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />
-          <h2 className="text-2xl font-semibold text-gray-900 mb-2">
-            Absensi Hari Ini Sudah Lengkap
-          </h2>
-          <p className="text-gray-600 mb-6">
-            Anda sudah melakukan check-in dan check-out untuk hari ini.
-          </p>
-          
-          {todayAttendance && (
-            <div className="bg-gray-50 rounded-lg p-4 text-left max-w-sm mx-auto">
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Check-in:</span>
-                  <span className="font-medium">
-                    {new Date(todayAttendance.check_in_time).toLocaleTimeString('id-ID')}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Check-out:</span>
-                  <span className="font-medium">
-                    {new Date(todayAttendance.check_out_time).toLocaleTimeString('id-ID')}
-                  </span>
-                </div>
-                <div className="flex justify-between border-t pt-2">
-                  <span className="text-gray-600">Status:</span>
-                  <span className={`font-medium ${
-                    todayAttendance.approval_status === 'approved' ? 'text-green-600' :
-                    todayAttendance.approval_status === 'rejected' ? 'text-red-600' :
-                    'text-yellow-600'
-                  }`}>
-                    {todayAttendance.approval_status === 'approved' ? 'Disetujui' :
-                     todayAttendance.approval_status === 'rejected' ? 'Ditolak' :
-                     'Menunggu Approval'}
-                  </span>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
+  const canProceed = validationSummary.score >= 50;
 
   return (
     <div className="max-w-4xl mx-auto p-6 space-y-6">
       {/* Header */}
       <div className="bg-white rounded-lg shadow-sm p-6">
         <h1 className="text-2xl font-bold text-gray-900">
-          {attendanceType === 'check_in' ? 'Check In' : 'Check Out'}
+          Enhanced Attendance System
         </h1>
         <p className="text-gray-600 mt-1">
           Sistem absensi dengan validasi multi-layer untuk keamanan maksimal
         </p>
       </div>
-
-      {/* Device Registration Alert */}
-      {device.needsRegistration && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-          <div className="flex items-start">
-            <AlertTriangle className="h-5 w-5 text-yellow-400 mt-0.5 mr-3" />
-            <div className="flex-1">
-              <h3 className="text-sm font-medium text-yellow-800">
-                Device Belum Terdaftar
-              </h3>
-              <p className="text-sm text-yellow-700 mt-1">
-                Device Anda belum terdaftar dalam sistem. Daftarkan device untuk meningkatkan skor validasi.
-              </p>
-              <button
-                onClick={handleRegisterDevice}
-                className="mt-2 bg-yellow-100 text-yellow-800 px-3 py-1 rounded-md text-sm font-medium hover:bg-yellow-200"
-              >
-                Daftar Device
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Main Form */}
@@ -308,7 +322,7 @@ const EnhancedAttendancePage = () => {
                 }`}>1</span>
                 Validasi Sistem
               </h3>
-              {validationSummary && (
+              {validationSummary.score > 0 && (
                 <div className={`px-3 py-1 rounded-full text-sm font-medium ${
                   validationSummary.scoreColor === 'green' ? 'bg-green-100 text-green-800' :
                   validationSummary.scoreColor === 'yellow' ? 'bg-yellow-100 text-yellow-800' :
@@ -323,17 +337,16 @@ const EnhancedAttendancePage = () => {
               {/* Location Status */}
               <div className="flex items-center justify-between p-3 border rounded-lg">
                 <div className="flex items-center">
-                  <MapPin className={`h-5 w-5 mr-3 ${location ? 'text-green-600' : 'text-gray-400'}`} />
+                  <MapPin className={`h-5 w-5 mr-3 ${validationState.location ? 'text-green-600' : 'text-gray-400'}`} />
                   <span className="text-sm">
-                    Lokasi: {location ? 'Terdeteksi' : 'Belum terdeteksi'}
+                    Lokasi: {validationState.location ? 'Terdeteksi' : 'Belum terdeteksi'}
                   </span>
                 </div>
                 <button
                   onClick={getCurrentLocation}
-                  disabled={isLoading}
                   className="text-blue-600 hover:text-blue-700 text-sm"
                 >
-                  {isLoading ? <Loader className="h-4 w-4 animate-spin" /> : 'Refresh'}
+                  Refresh
                 </button>
               </div>
 
@@ -341,46 +354,38 @@ const EnhancedAttendancePage = () => {
               <div className="border rounded-lg p-3">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center">
-                    <Wifi className={`h-5 w-5 mr-3 ${network.networkInfo?.ssid ? 'text-green-600' : 'text-gray-400'}`} />
+                    <Wifi className={`h-5 w-5 mr-3 ${validationState.wifi?.ssid ? 'text-green-600' : 'text-gray-400'}`} />
                     <span className="text-sm">
-                      WiFi: {network.networkInfo?.ssid || 'Tidak terdeteksi'}
+                      WiFi: {validationState.wifi?.ssid || 'Tidak terdeteksi'}
                     </span>
                   </div>
-                  <button
-                    onClick={toggleManualWifiMode}
-                    className="text-blue-600 hover:text-blue-700 text-sm"
-                  >
-                    {network.manualWifiMode ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
                 </div>
                 
-                {network.manualWifiMode && (
-                  <input
-                    type="text"
-                    placeholder="Masukkan nama WiFi (SSID)"
-                    value={network.wifiSSID}
-                    onChange={(e) => setManualWifiSSID(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
-                  />
-                )}
+                <input
+                  type="text"
+                  placeholder="Masukkan nama WiFi (SSID) manual"
+                  value={manualWifiSSID}
+                  onChange={(e) => setManualWifiSSID(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm mt-2"
+                />
               </div>
 
               {/* Device Status */}
               <div className="flex items-center justify-between p-3 border rounded-lg">
                 <div className="flex items-center">
-                  <Smartphone className={`h-5 w-5 mr-3 ${device.isRegistered ? 'text-green-600' : 'text-yellow-600'}`} />
+                  <Smartphone className={`h-5 w-5 mr-3 ${validationState.device?.valid ? 'text-green-600' : 'text-yellow-600'}`} />
                   <span className="text-sm">
-                    Device: {device.isRegistered ? 'Terdaftar' : 'Belum terdaftar'}
+                    Device: {validationState.device?.valid ? 'Terdaftar' : 'Belum terdaftar'}
                   </span>
                 </div>
               </div>
 
               <button
-                onClick={handleRunValidation}
-                disabled={isLoading || !location}
+                onClick={runValidation}
+                disabled={isProcessing || !validationState.location}
                 className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium"
               >
-                {validation.isValidating ? (
+                {isProcessing ? (
                   <div className="flex items-center justify-center">
                     <Loader className="h-4 w-4 animate-spin mr-2" />
                     Memvalidasi...
@@ -457,10 +462,10 @@ const EnhancedAttendancePage = () => {
                     </button>
                     <button
                       onClick={handleSubmitAttendance}
-                      disabled={submit.isSubmitting}
+                      disabled={isProcessing}
                       className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium"
                     >
-                      {submit.isSubmitting ? (
+                      {isProcessing ? (
                         <div className="flex items-center">
                           <Loader className="h-4 w-4 animate-spin mr-2" />
                           Memproses...
@@ -479,7 +484,7 @@ const EnhancedAttendancePage = () => {
         {/* Sidebar - Validation Details */}
         <div className="space-y-6">
           {/* Validation Summary */}
-          {validationSummary && (
+          {validationSummary.score > 0 && (
             <div className="bg-white rounded-lg shadow-sm p-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold text-lg">Status Validasi</h3>
@@ -551,17 +556,6 @@ const EnhancedAttendancePage = () => {
                       </div>
                     </div>
                   ))}
-
-                  {validationSummary.errors.length > 0 && (
-                    <div className="mt-3 p-2 bg-red-50 rounded border border-red-200">
-                      <p className="text-xs font-medium text-red-800 mb-1">Errors:</p>
-                      <ul className="text-xs text-red-700 space-y-1">
-                        {validationSummary.errors.map((error, index) => (
-                          <li key={index}>• {error}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
                 </div>
               )}
             </div>
@@ -578,10 +572,6 @@ const EnhancedAttendancePage = () => {
               <div className="flex justify-between">
                 <span className="text-gray-600">Tanggal:</span>
                 <span className="font-medium">{new Date().toLocaleDateString('id-ID')}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Karyawan:</span>
-                <span className="font-medium">{user.user_metadata?.full_name || user.email}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600">Tipe:</span>
@@ -610,7 +600,7 @@ const EnhancedAttendancePage = () => {
       <canvas ref={canvasRef} style={{ display: 'none' }} />
       
       {/* Loading Overlay */}
-      {isLoading && (
+      {isProcessing && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 flex items-center space-x-3">
             <Loader className="h-6 w-6 animate-spin text-blue-600" />
