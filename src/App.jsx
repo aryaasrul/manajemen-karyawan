@@ -1,15 +1,21 @@
+// ============================================
+// FILE: src/App.jsx
+// Updated Route Setup with Enhanced Attendance System
+// Sesuai dengan struktur project yang ada
+// ============================================
+
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import { useEffect } from 'react'
 import { Toaster } from 'react-hot-toast'
 import { useAuthStore } from './stores/authStore'
 import { useCompanyStore } from './stores/companyStore'
 
-// Components
+// Components (existing)
 import Layout from './components/common/Layout'
 import AuthGuard from './components/auth/AuthGuard'
 import LoadingSpinner from './components/common/LoadingSpinner'
 
-// Pages
+// Pages (existing)
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
 import AttendancePage from './pages/AttendancePage'
@@ -19,9 +25,14 @@ import AdminDashboard from './pages/admin/AdminDashboard'
 import AdminEmployees from './pages/admin/AdminEmployees'
 import AdminAttendance from './pages/admin/AdminAttendance'
 import AdminSalary from './pages/admin/AdminSalary'
-import AdminSettings from './pages/admin/AdminSettings' // New import
+import AdminSettings from './pages/admin/AdminSettings'
 
-// Smart redirect component
+// New Enhanced Pages
+import EnhancedAttendancePage from './pages/EnhancedAttendancePage'
+import AdminManagementPage from './pages/admin/AdminManagementPage'
+import AdminApprovalDashboard from './pages/admin/AdminApprovalDashboard'
+
+// Smart redirect component (existing)
 const SmartRedirect = () => {
   const { profile } = useAuthStore()
   
@@ -78,10 +89,19 @@ function App() {
             </AuthGuard>
           } />
           
+          {/* Attendance routes - keep both old and new */}
           <Route path="/attendance" element={
             <AuthGuard>
               <Layout>
                 <AttendancePage />
+              </Layout>
+            </AuthGuard>
+          } />
+          
+          <Route path="/attendance/enhanced" element={
+            <AuthGuard>
+              <Layout>
+                <EnhancedAttendancePage />
               </Layout>
             </AuthGuard>
           } />
@@ -135,11 +155,28 @@ function App() {
             </AuthGuard>
           } />
           
-          {/* New Admin Settings Route */}
+          {/* Existing Admin Settings Route */}
           <Route path="/admin/settings" element={
             <AuthGuard requireAdmin>
               <Layout>
                 <AdminSettings />
+              </Layout>
+            </AuthGuard>
+          } />
+          
+          {/* New Enhanced Admin Routes */}
+          <Route path="/admin/approvals" element={
+            <AuthGuard requireAdmin>
+              <Layout>
+                <AdminApprovalDashboard />
+              </Layout>
+            </AuthGuard>
+          } />
+          
+          <Route path="/admin/management" element={
+            <AuthGuard requireAdmin>
+              <Layout>
+                <AdminManagementPage />
               </Layout>
             </AuthGuard>
           } />
