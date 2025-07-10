@@ -1,4 +1,4 @@
-// src/pages/admin/AdminSettings.jsx - New page untuk Company Settings
+// src/pages/admin/AdminSettings.jsx - Fixed version
 import { useState, useEffect } from 'react'
 import { supabase, supabaseHelpers } from '../../lib/supabase'
 import { useGeolocation } from '../../hooks/useGeolocation'
@@ -26,7 +26,6 @@ const AdminSettings = () => {
   })
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
-  const [showMap, setShowMap] = useState(false)
   
   const { location, isLoading: isGettingLocation, getCurrentLocation, error: locationError } = useGeolocation()
 
@@ -40,13 +39,14 @@ const AdminSettings = () => {
       const { data, error } = await supabaseHelpers.getCompanySettingsObject()
       if (error) throw error
       
+      // Merge dengan default settings
       setSettings(prevSettings => ({
         ...prevSettings,
         ...data
       }))
     } catch (error) {
       console.error('Error fetching settings:', error)
-      toast.error('Gagal memuat pengaturan')
+      toast.error('Gagal memuat pengaturan: ' + error.message)
     } finally {
       setIsLoading(false)
     }
@@ -86,19 +86,15 @@ const AdminSettings = () => {
       const lat = parseFloat(settings.office_latitude)
       const lng = parseFloat(settings.office_longitude)
       
-      if (isNaN(lat) || isNaN(lng)) {
-        throw new Error('Koordinat lokasi tidak valid')
-      }
-      
-      if (lat < -90 || lat > 90) {
+      if (settings.office_latitude && (isNaN(lat) || lat < -90 || lat > 90)) {
         throw new Error('Latitude harus antara -90 dan 90')
       }
       
-      if (lng < -180 || lng > 180) {
+      if (settings.office_longitude && (isNaN(lng) || lng < -180 || lng > 180)) {
         throw new Error('Longitude harus antara -180 dan 180')
       }
 
-      // Save all settings
+      // Save settings one by one dengan better error handling
       const settingsToSave = [
         { key: 'office_latitude', value: settings.office_latitude, description: 'Latitude kantor untuk validasi GPS' },
         { key: 'office_longitude', value: settings.office_longitude, description: 'Longitude kantor untuk validasi GPS' },
@@ -108,16 +104,51 @@ const AdminSettings = () => {
         { key: 'selfie_auto_delete_hours', value: settings.selfie_auto_delete_hours, description: 'Auto delete selfie setelah X jam' }
       ]
 
+      let successCount = 0
+      const errors = []
+
       for (const setting of settingsToSave) {
-        const { error } = await supabaseHelpers.updateCompanySetting(
-          setting.key, 
-          setting.value, 
-          setting.description
-        )
-        if (error) throw error
+        try {
+          // Using direct supabase call instead of helper untuk debugging
+          const { error } = await supabase
+            .from('company_settings')
+            .upsert({
+              key: setting.key,
+              value: setting.value,
+              description: setting.description,
+              updated_at: new Date().toISOString()
+            }, {
+              onConflict: 'key'
+            })
+
+          if (error) {
+            console.error(`Error saving ${setting.key}:`, error)
+            errors.push(`${setting.key}: ${error.message}`)
+          } else {
+            successCount++
+          }
+        } catch (err) {
+          console.error(`Exception saving ${setting.key}:`, err)
+          errors.push(`${setting.key}: ${err.message}`)
+        }
       }
 
-      toast.success('Pengaturan berhasil disimpan!')
+      if (errors.length > 0) {
+        console.error('Save errors:', errors)
+        toast.error(`Beberapa pengaturan gagal disimpan: ${errors.join(', ')}`)
+      }
+
+      if (successCount > 0) {
+        toast.success(`${successCount} pengaturan berhasil disimpan!`)
+        
+        // Refresh settings dari database
+        await fetchSettings()
+      }
+
+      if (successCount === 0) {
+        throw new Error('Tidak ada pengaturan yang berhasil disimpan')
+      }
+
     } catch (error) {
       console.error('Error saving settings:', error)
       toast.error(error.message || 'Gagal menyimpan pengaturan')
@@ -150,6 +181,30 @@ const AdminSettings = () => {
     return Math.round(R * c) // Distance in meters
   }
 
+  // Debug function untuk cek user role
+  const checkUserRole = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', user.id)
+          .single()
+        
+        console.log('Current user role:', profile?.role)
+        return profile?.role
+      }
+    } catch (error) {
+      console.error('Error checking user role:', error)
+    }
+  }
+
+  // Call check user role on component mount untuk debugging
+  useEffect(() => {
+    checkUserRole()
+  }, [])
+
   if (isLoading) {
     return (
       <div className="space-y-6">
@@ -169,6 +224,21 @@ const AdminSettings = () => {
       <div className="bg-white rounded-lg shadow-sm p-6">
         <h1 className="text-2xl font-bold text-gray-900">Pengaturan Perusahaan</h1>
         <p className="text-gray-600 mt-1">Kelola lokasi kantor dan pengaturan sistem</p>
+      </div>
+
+      {/* Debug Info - Remove in production */}
+      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+        <div className="text-sm">
+          <p><strong>Debug Info:</strong></p>
+          <p>Current Settings Keys: {Object.keys(settings).join(', ')}</p>
+          <p>Location Error: {locationError || 'None'}</p>
+          <button 
+            onClick={checkUserRole}
+            className="mt-2 text-blue-600 hover:text-blue-800 underline"
+          >
+            Check User Role (Console)
+          </button>
+        </div>
       </div>
 
       {/* Office Location Settings */}
