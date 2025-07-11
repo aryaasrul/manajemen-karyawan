@@ -12,7 +12,7 @@ import LoadingSpinner from './components/common/LoadingSpinner';
 // --- Statically Imported Pages (Core) ---
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
-import AttendancePage from './pages/AttendancePage';
+// import AttendancePage from './pages/AttendancePage'; // Dihapus
 import SalaryPage from './pages/SalaryPage';
 import ProfilePage from './pages/ProfilePage';
 import AdminDashboard from './pages/admin/AdminDashboard';
@@ -78,8 +78,7 @@ function App() {
           
           {/* --- Employee Routes --- */}
           <Route path="/dashboard" element={<AuthGuard><Layout><DashboardPage /></Layout></AuthGuard>} />
-          <Route path="/attendance" element={<AuthGuard><Layout><AttendancePage /></Layout></AuthGuard>} />
-          <Route path="/attendance/enhanced" element={<AuthGuard><Layout><Suspense fallback={<PageLoader />}><EnhancedAttendancePage /></Suspense></Layout></AuthGuard>} />
+          <Route path="/attendance" element={<AuthGuard><Layout><Suspense fallback={<PageLoader />}><EnhancedAttendancePage /></Suspense></Layout></AuthGuard>} />
           <Route path="/salary" element={<AuthGuard><Layout><SalaryPage /></Layout></AuthGuard>} />
           <Route path="/profile" element={<AuthGuard><Layout><ProfilePage /></Layout></AuthGuard>} />
           

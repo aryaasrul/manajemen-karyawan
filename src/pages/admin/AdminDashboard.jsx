@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
+import { toast } from 'react-hot-toast'; // Ditambahkan
 import { Users, Clock, DollarSign, Calendar, AlertCircle, Settings } from 'lucide-react';
 import dayjs from 'dayjs';
 import 'dayjs/locale/id';
@@ -38,7 +39,8 @@ const AdminDashboard = () => {
         supabase.from('attendance').select('id', { count: 'exact' }).eq('date', today),
         supabase.from('bonus_pending').select('id', { count: 'exact' }).eq('status', 'pending'),
         supabase.from('salary_slips').select('total_salary').eq('month', currentMonth).eq('year', currentYear),
-        supabase.from('attendance').select('id, check_in_time, check_out_time, total_minutes, profiles(full_name, employee_id)').order('created_at', { ascending: false }).limit(5)
+        // Query diperbaiki untuk lebih spesifik
+        supabase.from('attendance').select('id, check_in_time, check_out_time, total_minutes, profiles:user_id(full_name, employee_id)').order('created_at', { ascending: false }).limit(5)
       ]);
 
       if (employeesRes.error) throw employeesRes.error;

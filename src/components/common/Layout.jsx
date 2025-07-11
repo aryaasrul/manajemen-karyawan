@@ -24,7 +24,7 @@ const Layout = ({ children }) => {
 
   const employeeNavigation = [
     { name: 'Dashboard', href: '/dashboard', icon: Home },
-    { name: 'Absensi', href: '/attendance/enhanced', icon: Clock },
+    { name: 'Absensi', href: '/attendance', icon: Clock },
     { name: 'Gaji', href: '/salary', icon: DollarSign },
     { name: 'Profile', href: '/profile', icon: User },
   ];
@@ -55,9 +55,6 @@ const Layout = ({ children }) => {
   };
 
   const isRouteActive = (href) => {
-    if (href === '/attendance/enhanced' && location.pathname.startsWith('/attendance')) {
-      return true;
-    }
     return location.pathname === href;
   };
 

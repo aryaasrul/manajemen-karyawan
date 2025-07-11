@@ -40,7 +40,7 @@ const AdminAttendance = () => {
         .from('attendance')
         .select(`
           *,
-          profiles(full_name, employee_id)
+          profiles:user_id(full_name, employee_id)
         `)
         .eq('date', dateFilter)
         .order('created_at', { ascending: false })

@@ -50,7 +50,7 @@ const AdminSalary = () => {
       .from('salary_slips')
       .select(`
         *,
-        profiles(full_name, employee_id)
+        profiles:user_id(full_name, employee_id)
       `)
       .order('year', { ascending: false })
       .order('month', { ascending: false })

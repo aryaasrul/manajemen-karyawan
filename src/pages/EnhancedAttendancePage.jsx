@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useAuthStore } from '../../stores/authStore';
-import { useCompanyStore } from '../../stores/companyStore';
-import { supabase } from '../../lib/supabase';
+import { Link } from 'react-router-dom';
+import { useAuthStore } from '../stores/authStore';
+import { useCompanyStore } from '../stores/companyStore';
+import { supabase } from '../lib/supabase';
 import { toast } from 'react-hot-toast';
-import { useGeolocation } from '../../hooks/useGeolocation';
-import { useCamera } from '../../hooks/useCamera';
+import { useGeolocation } from '../hooks/useGeolocation';
+import { useCamera } from '../hooks/useCamera';
 import { MapPin, Wifi, Smartphone, Clock, Camera, CheckCircle, XCircle, Loader2, RotateCcw, HelpCircle } from 'lucide-react';
-import CameraCapture from '../../components/common/CameraCapture';
+import CameraCapture from '../components/common/CameraCapture';
+import dayjs from 'dayjs';
 
 // Komponen untuk menampilkan status validasi
 const ValidationItem = ({ icon: Icon, label, status, message, onRetry, isLoading }) => {
@@ -58,6 +60,7 @@ const EnhancedAttendancePage = () => {
   const [showCamera, setShowCamera] = useState(false);
   const [capturedImage, setCapturedImage] = useState(null);
   const [attendanceType, setAttendanceType] = useState(null);
+  const [isAttendanceComplete, setIsAttendanceComplete] = useState(false);
 
   // Fungsi untuk menjalankan semua validasi
   const runAllValidations = useCallback(async () => {
@@ -74,14 +77,28 @@ const EnhancedAttendancePage = () => {
         lat: currentLocation.latitude,
         lng: currentLocation.longitude
       });
-      if (error) throw error;
+
+      if (error) {
+        if (error.code === 'PGRST200') { // "Not Found" untuk RPC
+            console.error("Fungsi RPC 'is_location_whitelisted' tidak ditemukan di database.");
+            throw new Error("Fungsi validasi lokasi tidak ditemukan. Hubungi admin.");
+        }
+        throw error;
+      }
       
-      const isValid = validationResult[0]?.is_valid;
-      if (isValid) score += 25;
-      setValidationStatus(prev => ({ ...prev, location: {
-        status: isValid ? 'success' : 'error',
-        message: isValid ? `Terdeteksi di ${validationResult[0].location_name}` : 'Anda berada di luar radius lokasi kantor yang diizinkan.'
-      }}));
+      const isValid = validationResult?.[0]?.is_valid;
+      if (isValid) {
+        score += 25;
+        setValidationStatus(prev => ({ ...prev, location: {
+          status: 'success',
+          message: `Terdeteksi di ${validationResult[0].location_name}`
+        }}));
+      } else {
+        setValidationStatus(prev => ({ ...prev, location: {
+          status: 'error',
+          message: 'Anda berada di luar radius lokasi kantor yang diizinkan.'
+        }}));
+      }
     } catch (error) {
       setValidationStatus(prev => ({ ...prev, location: { status: 'error', message: error.message }}));
     }
@@ -113,15 +130,25 @@ const EnhancedAttendancePage = () => {
   // Fetch data awal
   useEffect(() => {
     const init = async () => {
+        setIsLoading(true);
         if (user?.id) {
             await getSettings();
-            const { data } = await supabase.from('attendance').select('check_in_time, check_out_time').eq('user_id', user.id).eq('date', dayjs().format('YYYY-MM-DD')).single();
-            if (data?.check_in_time && !data?.check_out_time) {
+            const { data, error } = await supabase.from('attendance').select('check_in_time, check_out_time').eq('user_id', user.id).eq('date', dayjs().format('YYYY-MM-DD')).maybeSingle();
+            
+            if (error) {
+              console.error("Error fetching attendance:", error);
+              toast.error("Gagal memuat status absensi.");
+            }
+
+            if (data?.check_in_time && data?.check_out_time) {
+                setIsAttendanceComplete(true);
+            } else if (data?.check_in_time) {
                 setAttendanceType('check_out');
             } else {
                 setAttendanceType('check_in');
             }
         }
+        setIsLoading(false);
     };
     init();
   }, [user, getSettings]);
@@ -158,7 +185,6 @@ const EnhancedAttendancePage = () => {
             [`${attendanceType}_location`]: `POINT(${location.longitude} ${location.latitude})`,
             [`${attendanceType}_selfie_url`]: publicUrl,
             approval_status: requiresApproval ? 'pending' : 'approved',
-            // ... (tambahkan data validasi lain jika perlu)
         };
 
         // 3. Simpan ke tabel attendance
@@ -196,15 +222,30 @@ const EnhancedAttendancePage = () => {
     }
   };
 
-  if (!attendanceType) {
+  if (isLoading) {
       return <div className="flex justify-center items-center h-64"><Loader2 className="h-8 w-8 animate-spin"/></div>
   }
+
+  if (isAttendanceComplete) {
+    return (
+        <div className="max-w-2xl mx-auto space-y-6">
+            <div className="bg-white rounded-lg shadow-sm p-8 text-center">
+                <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />
+                <h1 className="text-2xl font-bold text-gray-900">Absensi Hari Ini Selesai!</h1>
+                <p className="text-gray-600 mt-2">
+                    Anda sudah melakukan check-in dan check-out untuk hari ini. Terima kasih!
+                </p>
+                <Link to="/dashboard" className="mt-6 inline-block bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700">Kembali ke Dashboard</Link>
+            </div>
+        </div>
+    );
+  }
   
-  if (attendanceType === 'check_in' && step === 1) {
+  if (step === 1) {
     return (
       <div className="max-w-2xl mx-auto space-y-6">
         <div className="bg-white rounded-lg shadow-sm p-6 text-center">
-          <h1 className="text-2xl font-bold text-gray-900">Absensi Masuk</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Absensi {attendanceType === 'check_in' ? 'Masuk' : 'Pulang'}</h1>
           <p className="text-gray-600 mt-1">Sistem akan melakukan validasi sebelum Anda mengambil foto.</p>
           <button onClick={handleStartAttendance} disabled={isLoading} className="mt-6 bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center w-full sm:w-auto mx-auto">
             {isLoading ? <><Loader2 className="h-5 w-5 animate-spin mr-2" /> Memvalidasi...</> : 'Mulai Proses Absensi'}
