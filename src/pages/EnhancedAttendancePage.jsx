@@ -11,7 +11,7 @@ import CameraCapture from '../components/common/CameraCapture';
 import dayjs from 'dayjs';
 
 // Komponen untuk menampilkan status validasi
-const ValidationItem = ({ icon: Icon, label, status, message, onRetry, isLoading }) => {
+const ValidationItem = ({ icon: Icon, label, status, message, onRetry, isLoading, children }) => {
   const statusConfig = {
     pending: { color: 'text-gray-400', icon: <Loader2 className="h-4 w-4 animate-spin" /> },
     success: { color: 'text-green-600', icon: <CheckCircle className="h-4 w-4" /> },
@@ -20,23 +20,26 @@ const ValidationItem = ({ icon: Icon, label, status, message, onRetry, isLoading
   const config = statusConfig[status] || statusConfig.pending;
 
   return (
-    <div className={`p-3 border rounded-lg flex items-start space-x-3 ${status === 'success' ? 'bg-green-50 border-green-200' : status === 'error' ? 'bg-red-50 border-red-200' : 'bg-gray-50'}`}>
-      <Icon className={`h-5 w-5 mt-0.5 ${config.color}`} />
-      <div className="flex-1">
-        <div className="flex justify-between items-center">
-          <p className={`font-medium ${config.color}`}>{label}</p>
-          <div className={`flex items-center space-x-2 ${config.color}`}>
-            {config.icon}
-            <span className="text-xs font-semibold uppercase">{status}</span>
+    <div className={`p-3 border rounded-lg flex flex-col space-y-2 ${status === 'success' ? 'bg-green-50 border-green-200' : status === 'error' ? 'bg-red-50 border-red-200' : 'bg-gray-50'}`}>
+      <div className="flex items-start space-x-3">
+        <Icon className={`h-5 w-5 mt-0.5 ${config.color}`} />
+        <div className="flex-1">
+          <div className="flex justify-between items-center">
+            <p className={`font-medium ${config.color}`}>{label}</p>
+            <div className={`flex items-center space-x-2 ${config.color}`}>
+              {config.icon}
+              <span className="text-xs font-semibold uppercase">{status}</span>
+            </div>
           </div>
+          <p className="text-xs text-gray-500 mt-1">{message}</p>
         </div>
-        <p className="text-xs text-gray-500 mt-1">{message}</p>
+        {status === 'error' && onRetry && (
+          <button onClick={onRetry} disabled={isLoading} className="text-blue-600 text-xs hover:underline disabled:opacity-50">
+            {isLoading ? 'Mencoba...' : 'Coba Lagi'}
+          </button>
+        )}
       </div>
-      {status === 'error' && onRetry && (
-        <button onClick={onRetry} disabled={isLoading} className="text-blue-600 text-xs hover:underline disabled:opacity-50">
-          {isLoading ? 'Mencoba...' : 'Coba Lagi'}
-        </button>
-      )}
+      {children}
     </div>
   );
 };
@@ -44,16 +47,17 @@ const ValidationItem = ({ icon: Icon, label, status, message, onRetry, isLoading
 const EnhancedAttendancePage = () => {
   const { user } = useAuthStore();
   const { settings, getSettings } = useCompanyStore();
-  const { location, getCurrentLocation, isLoading: isLocationLoading } = useGeolocation();
-  const { captureImage } = useCamera();
+  const { location, getCurrentLocation, isLoading: isLocationLoading, error: locationError } = useGeolocation();
   
-  const [step, setStep] = useState(1); // 1: validation, 2: selfie, 3: result
+  const [step, setStep] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [validationStatus, setValidationStatus] = useState({
-    location: { status: 'pending', message: 'Mengecek lokasi GPS...' },
-    wifi: { status: 'pending', message: 'Mendeteksi jaringan...' },
-    device: { status: 'pending', message: 'Memverifikasi perangkat...' },
+    location: { status: 'pending', message: 'Memulai pengecekan lokasi GPS...' },
+    wifi: { status: 'pending', message: 'Menunggu input SSID WiFi...' },
+    device: { status: 'success', message: 'Perangkat terverifikasi (diasumsikan valid).' }, // Diasumsikan sukses untuk sementara
   });
+  const [manualSsid, setManualSsid] = useState('');
   const [validationScore, setValidationScore] = useState(0);
   const [requiresApproval, setRequiresApproval] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -62,72 +66,7 @@ const EnhancedAttendancePage = () => {
   const [attendanceType, setAttendanceType] = useState(null);
   const [isAttendanceComplete, setIsAttendanceComplete] = useState(false);
 
-  // Fungsi untuk menjalankan semua validasi
-  const runAllValidations = useCallback(async () => {
-    if (!user || Object.keys(settings).length === 0) return;
-    
-    setIsLoading(true);
-    let score = 0;
-    const approvalThreshold = parseInt(settings.auto_approve_threshold || '80', 10);
-
-    // 1. Validasi Lokasi
-    try {
-      const currentLocation = await getCurrentLocation();
-      const { data: validationResult, error } = await supabase.rpc('is_location_whitelisted', {
-        lat: currentLocation.latitude,
-        lng: currentLocation.longitude
-      });
-
-      if (error) {
-        if (error.code === 'PGRST200') { // "Not Found" untuk RPC
-            console.error("Fungsi RPC 'is_location_whitelisted' tidak ditemukan di database.");
-            throw new Error("Fungsi validasi lokasi tidak ditemukan. Hubungi admin.");
-        }
-        throw error;
-      }
-      
-      const isValid = validationResult?.[0]?.is_valid;
-      if (isValid) {
-        score += 25;
-        setValidationStatus(prev => ({ ...prev, location: {
-          status: 'success',
-          message: `Terdeteksi di ${validationResult[0].location_name}`
-        }}));
-      } else {
-        setValidationStatus(prev => ({ ...prev, location: {
-          status: 'error',
-          message: 'Anda berada di luar radius lokasi kantor yang diizinkan.'
-        }}));
-      }
-    } catch (error) {
-      setValidationStatus(prev => ({ ...prev, location: { status: 'error', message: error.message }}));
-    }
-
-    // 2. Validasi WiFi (Placeholder - karena keterbatasan browser)
-    // Untuk saat ini, kita berikan status netral atau bisa diganti dengan input manual jika diperlukan
-    score += 25; // Asumsi WiFi valid untuk demo, bisa diubah
-    setValidationStatus(prev => ({ ...prev, wifi: { status: 'success', message: 'Validasi WiFi manual (diasumsikan valid).' }}));
-    
-    // 3. Validasi Device
-    // Logika ini perlu disempurnakan dengan fingerprinting yang lebih canggih
-    score += 20; // Asumsi device valid
-    setValidationStatus(prev => ({ ...prev, device: { status: 'success', message: 'Perangkat terverifikasi.' }}));
-    
-    // 4. Validasi Jam Kerja
-    const now = dayjs();
-    const startTime = dayjs(settings.work_start_time, 'HH:mm');
-    const endTime = dayjs(settings.work_end_time, 'HH:mm');
-    if (now.isAfter(startTime) && now.isBefore(endTime)) {
-      score += 10;
-    }
-
-    setValidationScore(score);
-    setRequiresApproval(score < approvalThreshold);
-    setIsLoading(false);
-    setStep(2); // Lanjut ke langkah selfie
-  }, [user, settings, getCurrentLocation]);
-
-  // Fetch data awal
+  // 1. Inisialisasi data utama (tipe absensi & pengaturan)
   useEffect(() => {
     const init = async () => {
         setIsLoading(true);
@@ -152,10 +91,89 @@ const EnhancedAttendancePage = () => {
     };
     init();
   }, [user, getSettings]);
-  
-  const handleStartAttendance = () => {
-    runAllValidations();
-  };
+
+  // 2. Memulai validasi lokasi secara otomatis
+  useEffect(() => {
+    if (step === 1 && !isAttendanceComplete) {
+      getCurrentLocation();
+    }
+  }, [step, isAttendanceComplete, getCurrentLocation]);
+
+  // 3. Update status UI berdasarkan hasil pengambilan lokasi
+  useEffect(() => {
+    if (isLocationLoading) {
+      setValidationStatus(prev => ({ ...prev, location: { status: 'pending', message: 'Sedang mengambil koordinat GPS...' }}));
+    } else if (locationError) {
+      setValidationStatus(prev => ({ ...prev, location: { status: 'error', message: locationError }}));
+    } else if (location) {
+      setValidationStatus(prev => ({ ...prev, location: { status: 'success', message: `Lokasi berhasil didapatkan.` }}));
+    }
+  }, [isLocationLoading, locationError, location]);
+
+
+  const handleValidation = useCallback(async () => {
+    if (!user || Object.keys(settings).length === 0 || !location) {
+        toast.error("Lokasi belum siap. Pastikan GPS aktif.");
+        return;
+    }
+    
+    setIsProcessing(true);
+    let score = 20; // Skor awal dari validasi device (placeholder)
+    const approvalThreshold = parseInt(settings.auto_approve_threshold || '80', 10);
+
+    // 1. Validasi Lokasi (menggunakan data yang sudah ada)
+    try {
+      const { data: validationResult, error } = await supabase.rpc('is_location_whitelisted', {
+        p_lat: parseFloat(location.latitude),
+        p_lng: parseFloat(location.longitude)
+      });
+      if (error) throw error;
+      
+      const isValid = validationResult?.[0]?.is_valid;
+      if (isValid) {
+        score += 25;
+        setValidationStatus(prev => ({ ...prev, location: { status: 'success', message: `Terdeteksi di ${validationResult[0].location_name}` }}));
+      } else {
+        setValidationStatus(prev => ({ ...prev, location: { status: 'error', message: 'Anda berada di luar radius lokasi kantor yang diizinkan.' }}));
+      }
+    } catch (error) {
+      setValidationStatus(prev => ({ ...prev, location: { status: 'error', message: "Gagal memvalidasi lokasi dengan server." }}));
+    }
+
+    // 2. Validasi WiFi secara manual
+    if (manualSsid.trim() !== '') {
+        const { data: wifiResult, error: wifiError } = await supabase
+            .from('approved_wifi_networks')
+            .select('ssid')
+            .eq('ssid', manualSsid.trim())
+            .eq('is_active', true)
+            .maybeSingle();
+
+        if (wifiError) {
+            setValidationStatus(prev => ({ ...prev, wifi: { status: 'error', message: 'Gagal memvalidasi WiFi.' }}));
+        } else if (wifiResult) {
+            score += 25;
+            setValidationStatus(prev => ({ ...prev, wifi: { status: 'success', message: `Terhubung ke WiFi yang disetujui: ${wifiResult.ssid}` }}));
+        } else {
+            setValidationStatus(prev => ({ ...prev, wifi: { status: 'error', message: 'Nama WiFi (SSID) tidak terdaftar atau tidak aktif.' }}));
+        }
+    } else {
+        setValidationStatus(prev => ({ ...prev, wifi: { status: 'error', message: 'Nama WiFi (SSID) wajib diisi.' }}));
+    }
+    
+    // 3. Validasi Jam Kerja
+    const now = dayjs();
+    const startTime = dayjs(settings.work_start_time, 'HH:mm');
+    const endTime = dayjs(settings.work_end_time, 'HH:mm');
+    if (now.isAfter(startTime) && now.isBefore(endTime)) {
+      score += 10;
+    }
+
+    setValidationScore(score);
+    setRequiresApproval(score < approvalThreshold);
+    setIsProcessing(false);
+    setStep(2);
+  }, [user, settings, location, manualSsid]);
 
   const handleCapture = (blob) => {
     setCapturedImage(blob);
@@ -170,7 +188,6 @@ const EnhancedAttendancePage = () => {
     setIsSubmitting(true);
     
     try {
-        // 1. Upload selfie
         const filePath = `${user.id}/${attendanceType}_${Date.now()}.jpg`;
         const { error: uploadError } = await supabase.storage.from('selfies').upload(filePath, capturedImage, {
             contentType: 'image/jpeg'
@@ -179,15 +196,16 @@ const EnhancedAttendancePage = () => {
 
         const { data: { publicUrl } } = supabase.storage.from('selfies').getPublicUrl(filePath);
 
-        // 2. Siapkan data absensi
+        // PERBAIKAN: Format data lokasi untuk tipe 'point' PostgreSQL
+        const locationString = `(${location.longitude},${location.latitude})`;
+
         const attendanceRecord = {
             [`${attendanceType}_time`]: new Date().toISOString(),
-            [`${attendanceType}_location`]: `POINT(${location.longitude} ${location.latitude})`,
+            [`${attendanceType}_location`]: locationString, // Menggunakan format yang benar
             [`${attendanceType}_selfie_url`]: publicUrl,
             approval_status: requiresApproval ? 'pending' : 'approved',
         };
 
-        // 3. Simpan ke tabel attendance
         const { data: savedAttendance, error: saveError } = await supabase
             .from('attendance')
             .upsert({
@@ -200,7 +218,6 @@ const EnhancedAttendancePage = () => {
 
         if (saveError) throw saveError;
         
-        // 4. Jika perlu approval, masukkan ke queue
         if (requiresApproval) {
             await supabase.from('attendance_approval_queue').insert({
                 attendance_id: savedAttendance.id,
@@ -213,7 +230,7 @@ const EnhancedAttendancePage = () => {
         }
 
         toast.success(`Absensi ${attendanceType === 'check_in' ? 'masuk' : 'pulang'} berhasil!`);
-        setStep(3); // Tampilkan halaman hasil
+        setStep(3);
 
     } catch (error) {
         toast.error(`Gagal melakukan absensi: ${error.message}`);
@@ -244,11 +261,30 @@ const EnhancedAttendancePage = () => {
   if (step === 1) {
     return (
       <div className="max-w-2xl mx-auto space-y-6">
-        <div className="bg-white rounded-lg shadow-sm p-6 text-center">
-          <h1 className="text-2xl font-bold text-gray-900">Absensi {attendanceType === 'check_in' ? 'Masuk' : 'Pulang'}</h1>
-          <p className="text-gray-600 mt-1">Sistem akan melakukan validasi sebelum Anda mengambil foto.</p>
-          <button onClick={handleStartAttendance} disabled={isLoading} className="mt-6 bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center w-full sm:w-auto mx-auto">
-            {isLoading ? <><Loader2 className="h-5 w-5 animate-spin mr-2" /> Memvalidasi...</> : 'Mulai Proses Absensi'}
+        <div className="bg-white rounded-lg shadow-sm p-6">
+          <h1 className="text-2xl font-bold text-gray-900 text-center">Absensi {attendanceType === 'check_in' ? 'Masuk' : 'Pulang'}</h1>
+          <p className="text-gray-600 mt-1 text-center mb-6">Sistem akan melakukan validasi sebelum Anda mengambil foto.</p>
+          
+          <div className="space-y-4">
+            <ValidationItem {...validationStatus.location} icon={MapPin} label="Lokasi" onRetry={getCurrentLocation} isLoading={isLocationLoading} />
+            <ValidationItem {...validationStatus.wifi} icon={Wifi} label="Jaringan WiFi">
+                <div className="mt-2">
+                    <label htmlFor="ssid-input" className="text-xs font-medium text-gray-700">Masukkan Nama WiFi (SSID):</label>
+                    <input
+                        id="ssid-input"
+                        type="text"
+                        value={manualSsid}
+                        onChange={(e) => setManualSsid(e.target.value)}
+                        placeholder="Contoh: Kantor_WiFi (sesuai huruf besar/kecil)"
+                        className="mt-1 block w-full input-field text-sm"
+                    />
+                </div>
+            </ValidationItem>
+            <ValidationItem {...validationStatus.device} icon={Smartphone} label="Perangkat" />
+          </div>
+
+          <button onClick={handleValidation} disabled={isLocationLoading || isProcessing} className="mt-6 w-full bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center">
+            {isProcessing ? <><Loader2 className="h-5 w-5 animate-spin mr-2" /> Memvalidasi...</> : 'Lanjutkan ke Ambil Foto'}
           </button>
         </div>
       </div>
@@ -261,7 +297,7 @@ const EnhancedAttendancePage = () => {
         <div className="bg-white rounded-lg shadow-sm p-6">
           <h2 className="text-lg font-semibold mb-4">Hasil Validasi</h2>
           <div className="space-y-3">
-            <ValidationItem {...validationStatus.location} icon={MapPin} label="Lokasi" onRetry={runAllValidations} isLoading={isLoading} />
+            <ValidationItem {...validationStatus.location} icon={MapPin} label="Lokasi" />
             <ValidationItem {...validationStatus.wifi} icon={Wifi} label="Jaringan WiFi" />
             <ValidationItem {...validationStatus.device} icon={Smartphone} label="Perangkat" />
           </div>

@@ -277,7 +277,17 @@ const GeneralSettingsTab = ({ initialSettings }) => {
 
 // Modal Component
 const ManagementModal = ({ type, item, locations, onClose, onSave }) => {
-    const [formData, setFormData] = useState({});
+    // Inisialisasi state dengan struktur lengkap untuk menghindari uncontrolled input
+    const [formData, setFormData] = useState({
+        location_name: item?.location_name || '',
+        latitude: item?.latitude || '',
+        longitude: item?.longitude || '',
+        radius_meters: item?.radius_meters || 100,
+        ssid: item?.ssid || '',
+        location_id: item?.location_id || null,
+        description: item?.description || '',
+        is_active: item?.is_active ?? true,
+    });
     const [isSaving, setIsSaving] = useState(false);
     const [showMap, setShowMap] = useState(false);
 
@@ -304,10 +314,30 @@ const ManagementModal = ({ type, item, locations, onClose, onSave }) => {
         e.preventDefault();
         setIsSaving(true);
         const tableName = type === 'location' ? 'whitelist_locations' : 'approved_wifi_networks';
+        
+        // Ambil hanya data yang relevan untuk tabel yang dituju
+        let dataToSave = {};
+        if (type === 'location') {
+            dataToSave = {
+                location_name: formData.location_name,
+                latitude: formData.latitude,
+                longitude: formData.longitude,
+                radius_meters: formData.radius_meters,
+                is_active: formData.is_active
+            };
+        } else if (type === 'wifi') {
+            dataToSave = {
+                ssid: formData.ssid,
+                location_id: formData.location_id,
+                description: formData.description,
+                is_active: formData.is_active
+            };
+        }
+
         try {
             const { error } = item
-                ? await supabase.from(tableName).update(formData).eq('id', item.id)
-                : await supabase.from(tableName).insert(formData);
+                ? await supabase.from(tableName).update(dataToSave).eq('id', item.id)
+                : await supabase.from(tableName).insert(dataToSave);
             
             if (error) throw error;
             toast.success(`Data ${type} berhasil disimpan.`);

@@ -848,3 +848,60 @@ CREATE POLICY "Admin can view approval queue" ON attendance_approval_queue FOR S
 );
 
 CREATE POLICY "Users can view their own approval queue" ON attendance_approval_queue FOR SELECT TO authenticated USING (user_id = auth.uid());
+
+-- Pastikan Anda sudah mengaktifkan ekstensi postgis
+-- Anda bisa cek di Database -> Extensions di dashboard Supabase
+
+CREATE OR REPLACE FUNCTION is_location_whitelisted(lat double precision, lng double precision)
+RETURNS TABLE(location_id uuid, location_name text, is_valid boolean) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT 
+    wl.id,
+    wl.location_name,
+    ST_DWithin(
+      ST_MakePoint(lng, lat)::geography,
+      ST_MakePoint(wl.longitude, wl.latitude)::geography,
+      wl.radius_meters
+    ) as is_valid
+  FROM whitelist_locations wl
+  WHERE wl.is_active = true
+  ORDER BY ST_Distance(
+    ST_MakePoint(lng, lat)::geography,
+    ST_MakePoint(wl.longitude, wl.latitude)::geography
+  ) ASC
+  LIMIT 1;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Hapus fungsi lama jika ada
+DROP FUNCTION IF EXISTS is_location_whitelisted(lat double precision, lng double precision);
+
+-- Buat fungsi baru yang lebih spesifik
+CREATE OR REPLACE FUNCTION is_location_whitelisted(
+    p_lat double precision,
+    p_lng double precision
+)
+RETURNS TABLE(location_id uuid, location_name text, is_valid boolean) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT 
+    wl.id,
+    wl.location_name,
+    ST_DWithin(
+      ST_MakePoint(p_lng, p_lat)::geography,
+      ST_MakePoint(wl.longitude, wl.latitude)::geography,
+      wl.radius_meters
+    ) as is_valid
+  FROM 
+    whitelist_locations wl
+  WHERE 
+    wl.is_active = true
+  ORDER BY 
+    ST_Distance(
+      ST_MakePoint(p_lng, p_lat)::geography,
+      ST_MakePoint(wl.longitude, wl.latitude)::geography
+    ) ASC
+  LIMIT 1;
+END;
+$$ LANGUAGE plpgsql;
